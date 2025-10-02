@@ -2,199 +2,262 @@
 #include <sddl.h>
 #include <lm.h>
 #include <iostream>
-#include <string>
-#include <vector>
 #include <iomanip>
+#include <string>
 
-// Hàm chuyển SID thành chuỗi
-std::wstring SidToString(PSID sid) {
+// Define _WIN32_WINNT for Windows Vista to ensure compatibility with required APIs
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+
+#pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "netapi32.lib")
+
+std::wstring getUserName() {
+    WCHAR username[256], domain[256];
+    DWORD usernameLen = sizeof(username) / sizeof(WCHAR), domainLen = sizeof(domain) / sizeof(WCHAR);
+    SID_NAME_USE sidType;
+    HANDLE hToken = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        return L"Unknown";
+    }
+
+    DWORD dwSize = 0;
+    GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
+    PTOKEN_USER pTokenUser = (PTOKEN_USER)malloc(dwSize);
+    if (!pTokenUser) {
+        CloseHandle(hToken);
+        return L"Unknown";
+    }
+
+    if (GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize)) {
+        if (LookupAccountSidW(NULL, pTokenUser->User.Sid, username, &usernameLen, domain, &domainLen, &sidType)) {
+            std::wstring result = domainLen > 0 ? std::wstring(domain) + L"\\" + std::wstring(username) : std::wstring(username);
+            free(pTokenUser);
+            CloseHandle(hToken);
+            return result;
+        }
+    }
+
+    free(pTokenUser);
+    CloseHandle(hToken);
+    return L"Unknown";
+}
+
+std::wstring getSidString(PSID sid) {
     LPWSTR sidString = nullptr;
     if (ConvertSidToStringSidW(sid, &sidString)) {
         std::wstring result(sidString);
         LocalFree(sidString);
         return result;
     }
-    return L"";
-}
-
-// Hàm lấy tên nhóm từ SID
-std::wstring GetGroupName(PSID sid, const std::wstring& domain) {
-    WCHAR name[256];
-    WCHAR dom[256];
-    DWORD nameLen = 256;
-    DWORD domLen = 256;
-    SID_NAME_USE use;
-    if (LookupAccountSidW(nullptr, sid, name, &nameLen, dom, &domLen, &use)) {
-        return std::wstring(dom) + L"\\" + name;
-    }
     return L"Unknown";
 }
 
-// Hàm lấy mô tả privilege
-std::wstring GetPrivilegeDescription(LPWSTR privilegeName) {
-    DWORD langId;
-    WCHAR desc[256];
-    DWORD descLen = 256;
-    if (LookupPrivilegeDisplayNameW(nullptr, privilegeName, desc, &descLen, &langId)) {
-        return desc;
-    }
-    return L"Unknown";
-}
-
-// Hàm in thông tin người dùng
-void PrintUserInformation(HANDLE token) {
-    std::wcout << L"USER INFORMATION" << std::endl;
-    std::wcout << L"----------------" << std::endl << std::endl;
-
-    DWORD size = 0;
-    GetTokenInformation(token, TokenUser, nullptr, 0, &size);
-    std::vector<BYTE> buffer(size);
-    if (GetTokenInformation(token, TokenUser, buffer.data(), size, &size)) {
-        TOKEN_USER* user = reinterpret_cast<TOKEN_USER*>(buffer.data());
-        WCHAR username[256];
-        WCHAR domain[256];
-        DWORD userLen = 256;
-        DWORD domLen = 256;
-        SID_NAME_USE use;
-        if (LookupAccountSidW(nullptr, user->User.Sid, username, &userLen, domain, &domLen, &use)) {
-            std::wcout << L"User Name      SID" << std::endl;
-            std::wcout << L"============== ==============================================" << std::endl;
-            std::wcout << domain << L"\\" << username << L" " << SidToString(user->User.Sid) << std::endl << std::endl;
+std::wstring getAccountName(PSID sid) {
+    WCHAR name[256], domain[256];
+    DWORD nameLen = sizeof(name) / sizeof(WCHAR), domainLen = sizeof(domain) / sizeof(WCHAR);
+    SID_NAME_USE sidType;
+    if (LookupAccountSidW(NULL, sid, name, &nameLen, domain, &domainLen, &sidType)) {
+        if (domain[0] != L'\0') {
+            return std::wstring(domain) + L"\\" + std::wstring(name);
         }
+        return std::wstring(name);
+    }
+    return L"Unknown";
+}
+
+std::wstring getGroupType(SID_NAME_USE sidType) {
+    switch (sidType) {
+    case SidTypeUser: return L"User";
+    case SidTypeGroup: return L"Group";
+    case SidTypeDomain: return L"Domain";
+    case SidTypeAlias: return L"Alias";
+    case SidTypeWellKnownGroup: return L"Well-known group";
+    case SidTypeDeletedAccount: return L"Deleted account";
+    case SidTypeInvalid: return L"Invalid";
+    case SidTypeUnknown: return L"Unknown";
+    case SidTypeComputer: return L"Computer";
+    case SidTypeLabel: return L"Label";
+    default: return L"Unknown";
     }
 }
 
-// Hàm in thông tin nhóm
-void PrintGroupInformation(HANDLE token) {
-    std::wcout << L"GROUP INFORMATION" << std::endl;
-    std::wcout << L"-----------------" << std::endl << std::endl;
+std::wstring getGroupAttributes(DWORD attributes) {
+    std::wstring result;
+    if (attributes & SE_GROUP_MANDATORY) result += L"Mandatory group, ";
+    if (attributes & SE_GROUP_ENABLED_BY_DEFAULT) result += L"Enabled by default, ";
+    if (attributes & SE_GROUP_ENABLED) result += L"Enabled group, ";
+    if (attributes & SE_GROUP_USE_FOR_DENY_ONLY) result += L"Group used for deny only, ";
+    if (result.empty()) return L"";
+    return result.substr(0, result.length() - 2); // Remove trailing comma and space
+}
 
-    DWORD size = 0;
-    GetTokenInformation(token, TokenGroups, nullptr, 0, &size);
-    std::vector<BYTE> buffer(size);
-    if (GetTokenInformation(token, TokenGroups, buffer.data(), size, &size)) {
-        TOKEN_GROUPS* groups = reinterpret_cast<TOKEN_GROUPS*>(buffer.data());
-        std::wcout << L"Group Name                                 Type             SID          Attributes" << std::endl;
-        std::wcout << L"========================================== ================ ============ ==================================================" << std::endl;
+std::wstring getPrivilegeState(DWORD attributes) {
+    if (attributes & SE_PRIVILEGE_ENABLED) return L"Enabled";
+    if (attributes & SE_PRIVILEGE_ENABLED_BY_DEFAULT) return L"Enabled by default";
+    return L"Disabled";
+}
 
-        for (DWORD i = 0; i < groups->GroupCount; ++i) {
-            std::wstring groupName = GetGroupName(groups->Groups[i].Sid, L"");
-            std::wstring sidStr = SidToString(groups->Groups[i].Sid);
-            std::wstring type;
-            SID_NAME_USE use;
-            WCHAR dummy[1];
-            DWORD dummyLen = 1;
-            LookupAccountSidW(nullptr, groups->Groups[i].Sid, dummy, &dummyLen, dummy, &dummyLen, &use);
-            switch (use) {
-            case SidTypeWellKnownGroup: type = L"Well-known group"; break;
-            case SidTypeAlias: type = L"Alias"; break;
-            default: type = L"Group"; break;
+bool isDomainJoined() {
+    LPWSTR domainName = nullptr;
+    NETSETUP_JOIN_STATUS joinStatus;
+    if (NetGetJoinInformation(NULL, &domainName, &joinStatus) == NERR_Success) {
+        bool joined = (joinStatus == NetSetupDomainName);
+        if (domainName) NetApiBufferFree(domainName);
+        return joined;
+    }
+    return false;
+}
+
+void printUserInfo() {
+    HANDLE hToken = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        std::wcerr << L"Failed to open process token\n";
+        return;
+    }
+
+    DWORD dwSize = 0;
+    GetTokenInformation(hToken, TokenUser, NULL, 0, &dwSize);
+    PTOKEN_USER pTokenUser = (PTOKEN_USER)malloc(dwSize);
+    if (!pTokenUser) {
+        CloseHandle(hToken);
+        return;
+    }
+
+    if (GetTokenInformation(hToken, TokenUser, pTokenUser, dwSize, &dwSize)) {
+        std::wstring username = getUserName();
+        std::wstring sid = getSidString(pTokenUser->User.Sid);
+
+        std::wcout << L"USER INFORMATION\n";
+        std::wcout << std::wstring(16, L'=') << L"\n\n";
+        std::wcout << std::setw(12) << std::left << L"User Name"
+            << std::setw(4) << L" " << std::wstring(45, L'=') << L"\n";
+        std::wcout << std::setw(12) << std::left << username
+            << std::setw(4) << L" " << sid << L"\n\n";
+    }
+
+    free(pTokenUser);
+    CloseHandle(hToken);
+}
+
+void printGroupInfo() {
+    HANDLE hToken = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        std::wcerr << L"Failed to open process token\n";
+        return;
+    }
+
+    DWORD dwSize = 0;
+    GetTokenInformation(hToken, TokenGroups, NULL, 0, &dwSize);
+    PTOKEN_GROUPS pTokenGroups = (PTOKEN_GROUPS)malloc(dwSize);
+    if (!pTokenGroups) {
+        CloseHandle(hToken);
+        return;
+    }
+
+    if (GetTokenInformation(hToken, TokenGroups, pTokenGroups, dwSize, &dwSize)) {
+        std::wcout << L"GROUP INFORMATION\n";
+        std::wcout << std::wstring(17, L'-') << L"\n\n";
+        std::wcout << std::setw(62) << std::left << L"Group Name"
+            << std::setw(4) << L" " << std::setw(17) << std::left << L"Type"
+            << std::setw(4) << L" " << std::setw(47) << std::left << L"SID"
+            << std::setw(4) << L" " << std::left << L"Attributes" << L"\n";
+        std::wcout << std::wstring(62, L'=') << L" " << std::wstring(17, L'=') << L" "
+            << std::wstring(47, L'=') << L" " << std::wstring(50, L'=') << L"\n";
+
+        for (DWORD i = 0; i < pTokenGroups->GroupCount; i++) {
+            SID_NAME_USE sidType;
+            WCHAR name[256], domain[256];
+            DWORD nameLen = sizeof(name) / sizeof(WCHAR), domainLen = sizeof(domain) / sizeof(WCHAR);
+            if (LookupAccountSidW(NULL, pTokenGroups->Groups[i].Sid, name, &nameLen, domain, &domainLen, &sidType)) {
+                if (sidType == SidTypeLogonSession) continue; // Skip LogonSessionId groups
+                std::wstring groupName = getAccountName(pTokenGroups->Groups[i].Sid);
+                std::wstring sid = getSidString(pTokenGroups->Groups[i].Sid);
+                std::wstring type = getGroupType(sidType);
+                std::wstring attributes = getGroupAttributes(pTokenGroups->Groups[i].Attributes);
+
+                std::wcout << std::setw(62) << std::left << groupName
+                    << std::setw(4) << L" " << std::setw(17) << std::left << type
+                    << std::setw(4) << L" " << std::setw(47) << std::left << sid
+                    << std::setw(4) << L" " << std::left << attributes << L"\n";
             }
-
-            std::wstring attributes;
-            if (groups->Groups[i].Attributes & SE_GROUP_MANDATORY) attributes += L"Mandatory group, ";
-            if (groups->Groups[i].Attributes & SE_GROUP_ENABLED_BY_DEFAULT) attributes += L"Enabled by default, ";
-            if (groups->Groups[i].Attributes & SE_GROUP_ENABLED) attributes += L"Enabled group";
-            if (attributes.empty()) attributes = L"None";
-            else attributes = attributes.substr(0, attributes.size() - 2); // Xóa dấu phẩy cuối
-
-            std::wcout << std::left << std::setw(42) << groupName
-                << std::setw(17) << type
-                << std::setw(13) << sidStr
-                << attributes << std::endl;
         }
-        std::wcout << std::endl;
+        std::wcout << L"\n";
     }
+
+    free(pTokenGroups);
+    CloseHandle(hToken);
 }
 
-// Hàm in thông tin privileges
-void PrintPrivilegesInformation(HANDLE token) {
-    std::wcout << L"PRIVILEGES INFORMATION" << std::endl;
-    std::wcout << L"----------------------" << std::endl << std::endl;
+void printPrivilegesInfo() {
+    HANDLE hToken = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hToken)) {
+        std::wcerr << L"Failed to open process token\n";
+        return;
+    }
 
-    DWORD size = 0;
-    GetTokenInformation(token, TokenPrivileges, nullptr, 0, &size);
-    std::vector<BYTE> buffer(size);
-    if (GetTokenInformation(token, TokenPrivileges, buffer.data(), size, &size)) {
-        TOKEN_PRIVILEGES* privs = reinterpret_cast<TOKEN_PRIVILEGES*>(buffer.data());
-        std::wcout << L"Privilege Name                Description                          State" << std::endl;
-        std::wcout << L"============================= ==================================== ========" << std::endl;
+    DWORD dwSize = 0;
+    GetTokenInformation(hToken, TokenPrivileges, NULL, 0, &dwSize);
+    PTOKEN_PRIVILEGES pTokenPrivileges = (PTOKEN_PRIVILEGES)malloc(dwSize);
+    if (!pTokenPrivileges) {
+        CloseHandle(hToken);
+        return;
+    }
 
-        for (DWORD i = 0; i < privs->PrivilegeCount; ++i) {
+    if (GetTokenInformation(hToken, TokenPrivileges, pTokenPrivileges, dwSize, &dwSize)) {
+        std::wcout << L"PRIVILEGES INFORMATION\n";
+        std::wcout << std::wstring(22, L'-') << L"\n\n";
+        std::wcout << std::setw(30) << std::left << L"Privilege Name"
+            << std::setw(4) << L" " << std::setw(37) << std::left << L"Description"
+            << std::setw(4) << L" " << std::left << L"State" << L"\n";
+        std::wcout << std::wstring(30, L'=') << L" " << std::wstring(37, L'=') << L" "
+            << std::wstring(10, L'=') << L"\n";
+
+        for (DWORD i = 0; i < pTokenPrivileges->PrivilegeCount; i++) {
             WCHAR privName[256];
-            DWORD privLen = 256;
-            LookupPrivilegeNameW(nullptr, &privs->Privileges[i].Luid, privName, &privLen);
-            std::wstring desc = GetPrivilegeDescription(privName);
-            std::wstring state = (privs->Privileges[i].Attributes & SE_PRIVILEGE_ENABLED) ? L"Enabled" : L"Disabled";
+            DWORD nameLen = sizeof(privName) / sizeof(WCHAR);
+            if (LookupPrivilegeNameW(NULL, &pTokenPrivileges->Privileges[i].Luid, privName, &nameLen)) {
+                WCHAR displayName[256];
+                DWORD displayNameLen = sizeof(displayName) / sizeof(WCHAR);
+                DWORD langId;
+                LookupPrivilegeDisplayNameW(NULL, privName, displayName, &displayNameLen, &langId);
+                std::wstring state = getPrivilegeState(pTokenPrivileges->Privileges[i].Attributes);
 
-            std::wcout << std::left << std::setw(30) << privName
-                << std::setw(37) << desc
-                << state << std::endl;
+                std::wcout << std::setw(30) << std::left << privName
+                    << std::setw(4) << L" " << std::setw(37) << std::left << displayName
+                    << std::setw(4) << L" " << std::left << state << L"\n";
+            }
         }
-        std::wcout << std::endl;
-    }
-}
-
-// Hàm in thông tin claims (đơn giản hóa vì thường unknown trong ngữ cảnh này)
-void PrintUserClaimsInformation() {
-    std::wcout << L"USER CLAIMS INFORMATION" << std::endl;
-    std::wcout << L"-----------------------" << std::endl << std::endl;
-    std::wcout << L"User claims unknown." << std::endl << std::endl;
-    std::wcout << L"Kerberos support for Dynamic Access Control on this device has been disabled." << std::endl << std::endl;
-}
-
-// Hàm in thông tin thêm (ví dụ: Integrity Level)
-void PrintAdditionalInformation(HANDLE token) {
-    std::wcout << L"ADDITIONAL INFORMATION" << std::endl;
-    std::wcout << L"----------------------" << std::endl << std::endl;
-
-    // Integrity Level
-    DWORD size = 0;
-    GetTokenInformation(token, TokenIntegrityLevel, nullptr, 0, &size);
-    std::vector<BYTE> buffer(size);
-    if (GetTokenInformation(token, TokenIntegrityLevel, buffer.data(), size, &size)) {
-        TOKEN_MANDATORY_LABEL* label = reinterpret_cast<TOKEN_MANDATORY_LABEL*>(buffer.data());
-        std::wstring sidStr = SidToString(label->Label.Sid);
-        std::wcout << L"Mandatory Integrity Level: " << sidStr << std::endl;
-
-        // Chuyển SID thành level
-        if (sidStr == L"S-1-16-4096") std::wcout << L" (Low Mandatory Level)" << std::endl;
-        else if (sidStr == L"S-1-16-8192") std::wcout << L" (Medium Mandatory Level)" << std::endl;
-        else if (sidStr == L"S-1-16-12288") std::wcout << L" (High Mandatory Level)" << std::endl;
-        else if (sidStr == L"S-1-16-16384") std::wcout << L" (System Mandatory Level)" << std::endl;
-        else std::wcout << L" (Unknown Level)" << std::endl;
+        std::wcout << L"\n";
     }
 
-    // Thông tin token khác
-    TOKEN_STATISTICS stats;
-    size = sizeof(TOKEN_STATISTICS);
-    if (GetTokenInformation(token, TokenStatistics, &stats, size, &size)) {
-        std::wcout << L"Token ID: " << stats.TokenId.HighPart << L":" << stats.TokenId.LowPart << std::endl;
-        std::wcout << L"Authentication ID: " << stats.AuthenticationId.HighPart << L":" << stats.AuthenticationId.LowPart << std::endl;
-        std::wcout << L"Expiration Time: " << stats.ExpirationTime.HighPart << L":" << stats.ExpirationTime.LowPart << std::endl;
-        std::wcout << L"Token Type: " << (stats.TokenType == TokenPrimary ? L"Primary" : L"Impersonation") << std::endl;
-        std::wcout << L"Impersonation Level: " << stats.ImpersonationLevel << std::endl;
-        std::wcout << L"Dynamic Charged: " << stats.DynamicCharged << std::endl;
-        std::wcout << L"Dynamic Available: " << stats.DynamicAvailable << std::endl;
-        std::wcout << L"Group Count: " << stats.GroupCount << std::endl;
-        std::wcout << L"Privilege Count: " << stats.PrivilegeCount << std::endl;
-        std::wcout << L"Modified ID: " << stats.ModifiedId.HighPart << L":" << stats.ModifiedId.LowPart << std::endl;
-    }
-    std::wcout << std::endl;
+    free(pTokenPrivileges);
+    CloseHandle(hToken);
 }
 
-int wmain() {
-    HANDLE token;
-    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-        PrintUserInformation(token);
-        PrintGroupInformation(token);
-        PrintPrivilegesInformation(token);
-        PrintUserClaimsInformation();
-        PrintAdditionalInformation(token);  // Phần thông tin chi tiết hơn
-        CloseHandle(token);
+void printUserClaimsInfo() {
+    std::wcout << L"USER CLAIMS INFORMATION\n";
+    std::wcout << std::wstring(23, L'-') << L"\n\n";
+    if (isDomainJoined()) {
+        std::wcout << L"User claims unknown.\n";
+        std::wcout << L"Kerberos support for Dynamic Access Control on this device has been disabled.\n";
     }
     else {
-        std::wcout << L"Failed to open process token. Error: " << GetLastError() << std::endl;
+        std::wcout << L"User claims unknown.\n";
     }
+    std::wcout << L"\n";
+}
+
+int main() {
+    // Set console output to UTF-8 for proper Unicode support
+    SetConsoleOutputCP(CP_UTF8);
+    std::wcout.imbue(std::locale(""));
+
+    printUserInfo();
+    printGroupInfo();
+    printPrivilegesInfo();
+    printUserClaimsInfo();
+
     return 0;
 }

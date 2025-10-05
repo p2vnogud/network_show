@@ -1,0 +1,68 @@
+* Whoami
+- Thay đổi user name: Mở Command Prompt as admin, chạy net user pc-10 /fullname "New Name".
+- Câu lệnh để từ user lên administrator: runas /user:administrator cmd
+- Ý nghĩa của type trong phần groups:
++ Well-known group: Group hệ thống mặc định, SID cố định (như Everyone, NT AUTHORITY\INTERACTIVE). Ý nghĩa: Không thể thay đổi, dùng cho quyền cơ bản toàn cầu. Quan trọng: Đảm bảo consistency giữa các máy.
++ Alias (thường là Built-in Groups): được hiểu như là một tên thân thiện gắn với một SID well-known. Nó là tên hiển thị cho một SID chuẩn cố định mà windows dùng để kiểm soát quyền. Thay vì gõ SID (S-1-5-32-544) thì admin chỉ cần gõ "Administrator" hoặc "Quản trị viên" gì đó.
+	+ Well-known group = “nhóm gốc”, do Windows định nghĩa, tự động có thành viên (ví dụ Everyone, Authenticated Users). Việc thêm những users vào nhóm sẽ do windows tự thêm nếu users đó có đủ điều kiện yêu cầu của group.
+	+ Alias group = một local group đặc biệt mà Windows cũng tạo sẵn khi cài máy. Cũng có SID cố định, nhưng việc thêm users sẽ do admin thực hiện.
++ Label (Integrity Labels – MIC): Không phải group thật, mà là “nhãn” integrity trong Mandatory Integrity Control (MIC). Xác định mức độ tin cậy của process hoặc object. Khi một process muốn truy cập resource, Windows so sánh label → Low không được ghi vào Medium/High.
++ User: một tài khoản cá nhân trên máy hoặc domain. Nó không phải group, nên không gán quyền cho người khác, mà là principal nhận quyền (ACE) trên object. Một user có thể thuộc nhiều group → effective permissions = tổng hợp các group + quyền trực tiếp trên user đó.
+
+* Cách phân biệt được alias và well-known group
+- well-known group 
++ Sẽ không có prefix là builtin, thường là một mình hoặc prefix NT AUTHORITY. 
++ Sẽ không thể nào tự động thêm membership
+- alias
++ Có thể thêm membership
++ Thường có prefix builtin
++ SID thường là S-1-5-32-xxx. Vì S-1-5-32 là BUILTIN domain.
+- BUILTIN groups (alias) là các nhóm local có sẵn trên hệ thống, admin sẽ dựa vào đây mà kiểm soát quyền cho các account mong muốn mà không cần phải cấu hình cho từng account. Dùng để phân quyền cục bộ cho từng máy.
+
+* universal ở đây ám chỉ phạm vi: có thể chứa user/group từ mọi domain trong forest và gán quyền cho resource ở bất kỳ domain nào.
+- Trong Active Directory:
++ Có thể chứa thành viên từ bất kỳ domain nào trong forest.
++ Có thể gán quyền (permissions) cho resource ở bất kỳ domain nào trong forest.
++ Thông tin membership được lưu trong Global Catalog, nên mọi domain controller đều biết.
++ Ví dụ: bạn có 2 domain A.com và B.com. Universal group UG_AllHR có thể chứa user từ cả A\Alice và B\Bob. Sau đó bạn gán UG_AllHR vào folder HR ở A.com → cả Alice và Bob đều truy cập được.
+
+- Trên máy đơn lẻ: Well-Known Universal Groups
++ Khi không có domain, bạn vẫn thấy các nhóm kiểu: Everyone, Authenticated Users, ANONYMOUS LOGON, LOCAL, INTERACTIVE   -> Chúng gọi là well-known SIDs. Đây là nhóm mà Windows tự động “thêm user vào” khi điều kiện phù hợp.
+
+
+* Về phần privilege:
+- Khi đăng nhập thì hệ thống sẽ gán cho user đó một số quyền nhất định, những quyền được hiển thị chính là quyền user đó có thể có được và điều chỉnh được
+- Với enabled thì quyền đó đã được bật sẵn rồi, chỉ cần thực hiện
+- Vói disabled thì quyền đó chưa được cấu hình, nếu cần thực hiện phải bật nó lên. Ví dụ seshutdown thì khi chạy shutdown /s thì nó sẽ gọi một api AdjustTokenPrivileges để bật quyền lên rồi thực hiện nên không cần bật thủ công. Để thấy được sự khác biệt thì khi chạy code sử dụng một api thực hiện tắt máy nhưng không qua AdjustTokenPrivileges thì nó báo lỗi không cho tắt vì seshutdown chưa được bật
+- Còn nếu không có quyền đó trong phần show privilege thì user hoàn toàn không sử dụng được quyền liên quan.
+- AdjustTokenPrivileges là API Windows dùng để bật/tắt các privilege (ví dụ SeDebugPrivilege, SeImpersonatePrivilege, SeShutdownPrivilege) trong một access token hiện có. Nó không “cấp” privilege mới cho account — nó chỉ kích hoạt (enable) những privilege đã nằm sẵn trong token (hoặc không thể bật nếu token không chứa privilege đó). Vì hoạt động rất nhẹ, im lặng (không tạo file, ít thay đổi hệ thống), nó là công cụ quen thuộc cho cả red-team và threat actors để mở rộng khả năng hành động.
+
+* Phân biệt với Group (Permission) và Privilege:
+- Groups và Permissions: Groups không có "quyền cố định" – quyền (permissions) của một group được gán lên tài nguyên cụ thể (như file, folder, registry, dịch vụ). Ví dụ, group "BUILTIN\Administrators" có thể có quyền "Full Control" trên C:\Windows, nhưng điều này phụ thuộc vào ACL (Access Control List) của tài nguyên đó. Để kiểm chứng, bạn phải tạo/tạo tài nguyên và thử truy cập.
+- Privileges: Đây là quyền hệ thống cao cấp (không phụ thuộc tài nguyên cụ thể), như tắt máy hay thay đổi múi giờ. Chúng được gán cho access token của user, và bạn có thể test bằng cách thử hành động yêu cầu privilege đó.
+
+* Các dạng ACE thường gặp (Allow / Deny / Inheritance)
+- Grant (Allow): cho phép một quyền (Read, Write, Modify, FullControl).
+- Deny: cấm một quyền (explicit deny). Dùng thận trọng — deny dễ gây lỗi permission.
+- Inheritance: ACE có thể là explicit (gán trực tiếp trên object) hoặc inherited (từ folder cha).
++ Inherited ACE có flag chỉ rõ cách di truyền (Object Inherit, Container Inherit, Inherit Only, No Propagate...).
++ Bạn có tắt inheritance cho object, rồi convert inherited to explicit hoặc remove inherited.
+
+* ACL (access control list)
+- Command:
++ Xem acl của thư mục: icacls C:\Windows
++ grant quyền: icacls C:\TestFolder /grant "BUILTIN\Users":R
++ deny quyền: icacls C:\TestFolder /deny "BUILTIN\Users":W
+
+* Giải thích về Attribute trong phần Group:
+- Mandatory group: Nhóm bắt buộc, không thể xóa khỏi access token của user trong session. Ý nghĩa: Đảm bảo user luôn thuộc nhóm này, dù trong bất kỳ ngữ cảnh nào. Ví dụ: "Everyone" luôn mandatory vì mọi user đều thuộc nhóm này.
+- Enabled by default: Nhóm được kích hoạt (enabled) mặc định khi tạo access token. Ý nghĩa: Nhóm này sẵn sàng để gán quyền (permissions) hoặc được sử dụng trong ACL (Access Control Lists) của tài nguyên (file, folder, dịch vụ). “Enabled by default” = nhóm sẽ tự bật khi tạo token, nhưng có thể bị UAC hay policy disable.
+- Enabled group: Nhóm hiện đang active trong session hiện tại. Ý nghĩa: Nhóm có thể được dùng để cấp quyền truy cập (nếu tài nguyên gán quyền cho nhóm đó). Nếu không enabled, nhóm không có hiệu lực trong session.
+- Group used for deny only: Nhóm chỉ được dùng để từ chối quyền (deny permissions), không dùng để cấp quyền. Ý nghĩa: Thường xuất hiện với UAC (User Account Control) trên Windows, để lọc quyền của admin trong mode standard (filtered token).
+
+** Cần làm rõ:
+- Các quyền xuất hiện trong whoami, cần làm rõ
+- Các group tham gia
+- Khi tham gia domain thì sao
+- Cần làm rõ phần USER CLAIMS INFORMATION và cách cấu hình nó
+

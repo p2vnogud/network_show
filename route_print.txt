@@ -1,0 +1,85 @@
+* Thứ tự ưu tiên tìm route
+- Tìm route có prefix dài nhất, có nghĩa là dãy IP hẹp hơn
+- Nếu prefix bằng nhau thì sẽ tìm AD được ưu tiên (AD thấp hơn sẽ được ưu tiên hơn). Ví dụ trên windows thì sẽ là static nên tất cả AD = 1, nếu có cấu hình dynamic OSPF (AD = 110) vậy nên sẽ chọn static
+- Administrative Distance (AD) là giá trị ưu tiên (route preference) được gán cho các loại route trong routing table, giúp router/máy tính quyết định route nào đáng tin cậy hơn khi có nhiều lựa chọn đến cùng destination.
+- Nếu prefix/AD bằng nhau thì sẽ ưu tiên lựa chọn metric thấp hơn
+
+
+* Thứ tự các bước khi một gói tin muốn gửi đến Destination IP
+- Nhận và De-encapsulate gói tin (Layer 2 đến Layer 3): Router/host nhận frame ethernet ở layer 2, kiểm tra FCS (Frame Check Sequence) để xác nhận không lỗi. Sau đó loại bỏ một số thử gửi gói IP đến layer 3. Nếu FCS lỗi thì drop. FCS nó sẽ xét tính toàn vẹn của gói tin. Nếu source là host chín (các ứng dụng trên chính máy) thì không cần check vì gói tin nội bộ.
+- Kiểm tra IP đích và xác định local hay remote. Nếu local (chung subnet) thì không cần routing table, sẽ gửi trực tiếp qua Arp để tìm MAC đích. Nếu remote thì sẽ chuyển sang tra cứu trong routing table để biết đi đuognừ nào
+- Tra cứu routing table: xét xem thằng nào match được prefix dài nhất (rõ ràng nhất). Ví dụ: /32 sẽ được ưu tiên hơn /24. Nếu không có route nào match thì sẽ dùng route default (0.0.0.0/0) hoặc drop nếu không có.
+- Nếu nhiều route khớp thì kiểm tra AD (càng thấp càng ưu tiên) (static AD = 1, OSPF AD = 110)
+- Kiểm tra Metric nếu AD bằng, chọn metric thấp nhất.
+
+
+* TTL (time to live) là giới hạn số router mà một gói tin được phép đi qua trước khi bị hủy
+- Khi một gói tin được tạo thì hdh sẽ đặt một giá trị TTL ban đầu, mỗi lần gói tin đi qua một router (hop), router đó sẽ đi 1, khi TTL = 0 thì router sẽ vứt bỏ gói tin và gửi lại thông báo lỗi ICMP
+- Ví dụ: Windows mặc định cho phép gói tin đi qua tối đa 128 hop trước khi hết hạn
++ Windows: 128
++ Linux: 64
++ MacOS: 64
++ Cisco router: 255
+- Khi nhận được gói tin trả về, nó sẽ kèm với thông tin TTL trả về, mình lấy TTL ban đầu được khởi tạo bởi hdh trừ cho TTL được trả về từ kết quả để tính được số hop mà gói tin này đi qua cho đến khi chạm tới đích
+- Trường hợp nếu không có TTL thì nếu gói tin bị định tuyến sai, các router gửi gói tin này theo một vòng tròn qua lại thì sẽ bị dính vào vòng lặp gửi gói tin vô tận. Vì vậy việc dùng TTL =, cứ qua một router thì nó -1 nên dù có bị dính định tuyến sai vào vòng lặp thì khi TTL về 0 thì gói tin sẽ bị hủy và gửi thông báo về lại cho source host để gửi lại gói tin mới.
+
+* Administrative Distance:
+- static: được thêm thủ công
+- EIGRP, OSPF RIP: học được tự động qua các giao thức định tuyến
+- directly connected: tuyến này đến trực tiếp qua interface vật lý, không qua router trung gian
++ Giống kiểu on-link
++ không cần gateway
++ không cần lệnh route add
++ được tạo tự động khi interface có địa chỉ IP
+
+* Khi một máy thực hiện gửi gói tin đến địa chỉ đích
+- Local: broadcast ARP → chỉ đúng host đích (hoặc router có IP đó) mới trả lời.
+- Remote: gửi cho router (default gateway) → cần ARP MAC router, sau đó router lo phần còn lại.
+- Nếu không có ai có IP đích → ARP request bị rơi (drop), không có reply, host giữ trạng thái "incomplete ARP" và retry vài lần, sau đó báo host unreachable.
+
+* Metric:
+- Interface metric: là trọng số chi phí gắn cho mỗi card mạng (network interface). Nó thể hiện mức ưu tiên của card đó khi có nhiều đường cùng đi đến một đích. Ví dụ khi đến một đích có nhiều đường đi qua nhiều interface khác nhau thì nó sẽ xét đến việc đi qua mỗi interface sẽ mất bao nhiêu chi phí (metric)
++ Lệnh kiểm tra metric của interface: netsh interface ipv4 show interfaces
++ Lệnh thay đổi metric của interface: Set-NetIPInterface -InterfaceIndex <ID> -InterfaceMetric <value>         | netsh interface ipv4 set interface <ID> metric=10
++ Có thể thay đổi metric của interface thông qua control panel: Control Panel → Network and Sharing Center → Change adapter settings. Chọn adapter (Ethernet/Wi-Fi) → Properties. Chọn Internet Protocol Version 4 (TCP/IPv4) → Properties → Advanced. Ở phần IP Settings, có mục Interface metric. Rồi cuối cùng thực hiện set lại metric theo mong muốn
+- Khi thực hiện add route và đặt thủ công metric, hệ điều hành sẽ cộng metric của route với metric của interface mà route đó đi qua
+- Đối với route với tùy chọn persistent (-p) nó sẽ được ghi vào registry: HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\PersistentRoutes. 
++ Mỗi lần khởi động thì windows sẽ đọc từ registry này rồi nạp lại routing table runtime. Việc không thấy metric của persistent trong mục persistent cộng thêm metric interface là vì nó lấy value từ registry và render lên console. Nhưng còn trong mục active ở trên sẽ có một route của persistent nhưng nó đang là runtime table routing nên nó sẽ được cộng metric interfaces mà nó đi qua. Khi restart lại thì mấy cái kia có thể sẽ bị thay đổi còn thằng persistent thì không.
+- Non-persistent route: chỉ nằm trong runtime (kernel memory) → reboot là mất, không có bản sao ở đâu cả.
+- Câu lệnh:
++ Thêm: route <-p> add <des-ip> mask <mask-ip> <default-gateway> <if> <id-if>
++ Xóa: route delete <des-ip> mask <mask-ip> <default-gateway>
++ Change: route change <des-ip> mask <mask-ip> <default-gate> <if> <id-if>
+- Có một vấn đề xảy ra ở đây đó chính là mặc định hệ thống sẽ cho một default route, route này có metric bằng chính với metric interface luôn. Khi thực hiện tạo một default route thủ công (cho dù với -p) thì metric tối thiểu là 1 (nếu đặt metric dưới thì hệ thống sẽ báo lỗi), nên lúc này ở table runtime thì default route được cấu hình thủ công nó sẽ có metric bằng metric được cấu hình thủ công cộng metric của interface. Lúc này thì đương nhiên là khi định tuyến nó sẽ ưu tiên thằng default route của hệ thống tạo ra vì nó có metric nhỏ hơn (trong trường hợp này thì prefix và ad là như nhau hết, chỉ khác gateway do mình cấu hình). Để khắc phục vấn đề này, chúng ta có thể change metric của default route do hệ thống tự đặt hoặc xóa luôn default route của hệ thống để định tuyến theo tuyến đường mà chúng ta đặt.
+
+* Một vấn đề nữa khi ta set rule như sau:
+    192.168.100.0    255.255.255.0         On-link    192.168.100.14     27
+    192.168.100.0    255.255.255.0   192.168.100.13   192.168.100.14     26
+- Khi tracert đến 192.168.100.10 thì nó sẽ chọn on-link
+- Đầu tiên nó sẽ xét prefix (mask nào cụ thể hơn thì nó chọn) thì thấy cả 2 bằng nhau nên nó sẽ ưu tiên chọn on-link trước
+- Metric lúc này sẽ không còn quan trọng nữa, nguyên tắc là nó sẽ ưu tiên đi trực tiếp nếu chung LAN.
+- Metric chỉ có tác dụng khi đi ra khác subnet, khi có nhiều gateway khác nhau thì mới tiếp tục xét đến metric của ai thấp hơn.
+
+* Bản chất:
+- tracert hiển thị IP của thiết bị thực sự xử lý gói và trả ICMP, không nhất thiết là IP bạn cấu hình trong route.
+
+
+* Get-NetNeighbor
+- Trường state: trạng thái entry trong neighbor cache
++ Reachable → Windows vừa trao đổi được gói tin với MAC này.
++ Stale → Entry còn trong cache nhưng lâu rồi không dùng; lần tới sẽ gửi probe để xác nhận lại.
++ Unreachable → Windows không thể liên lạc (ARP/NDP thất bại).
++ Permanent → Entry được cấu hình sẵn, không timeout (ví dụ broadcast, multicast).
+- Trường PolicyStore: Cho biết entry này đến từ đâu
++ ActiveStore → bảng động hiện tại (runtime).
++ PersistentStore (nếu có) → cấu hình lưu trong registry, tồn tại sau reboot.
++ GroupPolicyStore → từ Group Policy.
+
+* Câu hỏi thắc mắc:
+- Vậy nếu prefix/AD/metric đều bằng nhau hết thì nó sẽ lựa chọn trên tiêu chí gì?
+- 
+
+* Câu lệnh quan trọng:
+- Cho phép forward giữa các card mạng: sudo sysctl -w net.ipv4.ip_forward=1
+- Thêm route onlink:route add <destination> mask <netmask> <interface-ip> if <ifIndex> hoặc route add <destination> mask <netmask> <interface-ip> on-link
+

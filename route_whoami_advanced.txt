@@ -26,8 +26,8 @@ Computer Configuration
 Cập nhật GPO:
 + gpupdate /force
 Kiểm tra registry (trên client và server)
-+ reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters /v KdcUseRequestedEtypesForClaims
-+ reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters /v EnableCbacAndArmor
++ reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\KDC\Parameters /v CbacAndArmorLevel
++ reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\KDC\Parameters /v EnableCbacAndArmor
 
 
 - Kerberos:
@@ -40,8 +40,8 @@ Computer Configuration
 Cập nhật GPO:
 + gpupdate /force
 Registry:
-+ HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters\EnableCbacAndArmor
-+ HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters\KdcUseRequestedEtypesForClaims
++ HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters\EnableCbacAndArmor
++ HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Kerberos\Parameters
 
 
 * Tạo User Claim trong Active Directory

@@ -1,0 +1,67 @@
+HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\KDC\Parameters
+
+* Việc mà route -p add được lưu vào registry nhưng ở valuename mà không phải valuedata nghĩa là để các route có thể được phân biệt dễ dàng qua value name (tránh trùng lặp). Khi khởi động, driver TCP/IP sẽ duyệt qua tất cả value name trong key này để load route vào bảng định tuyến kernel.
+
+* Khi chúng ta set default gateway tĩnh thì nó sẽ được ghi vào registry của interface tương ứng. vì nó được set tĩnh nên khi restart nó sẽ không bị mất đi, khi đó hệ thống sẽ đọc registry và cho nó một đường mặc định route persistent. (ở điểm này thì interface chỉ có dhcpdefaultgateway sẽ không có được vì địa chỉ gateway phụ thuộc vào dhcp server nên nó có thể thay đổi nên không làm persistent được, đây là suy luận của em). Việc tại sao nó trở thành đường mặc định, theo suy luận của em thì mặc định gateway là nơi tiếp nhận mọi địa chỉ đến từ mọi IP chưa xác định nên mặc định thì sẽ cho qua gateway nên có một đường route default persistent.
+HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{GUID}
+
+* Tại sao windows không có các Win api để lấy persistent route mà phải lấy trong registry?
+
+
+
+
+
+
+
+* Cấu hình KDC và Kerberos:
+- KDC:
+Computer Configuration 
+ → Policies 
+   → Windows Settings 
+     → Security Settings 
+       → Local Policies 
+         → Security Options 
+           → KDC support for claims, compound authentication and Kerberos armoring
+Đặt thành Always provide claims hoặc Supported.
+Cập nhật GPO:
++ gpupdate /force
+Kiểm tra registry (trên client và server)
++ reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters /v KdcUseRequestedEtypesForClaims
++ reg query HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters /v EnableCbacAndArmor
+
+
+- Kerberos:
+Computer Configuration
+   → Administrative Templates
+      → System
+         → KDC (Kerberos Key Distribution Center)
+	   -> KDC support for claims, compound authentication and Kerberos armoring
+Đặt thành Always provide claims hoặc Supported.
+Cập nhật GPO:
++ gpupdate /force
+Registry:
++ HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters\EnableCbacAndArmor
++ HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters\KdcUseRequestedEtypesForClaims
+
+
+* Tạo User Claim trong Active Directory
+Nếu không có claim được định nghĩa thì sẽ là "Unknow", nếu có claim được định nghĩa mà user không nằm trong phạm vi được áp dụng thì sẽ là "no claim"
+- Mở Active Directory Administrative Center (ADAC) trên Domain Controller.
+- Trong cây bên trái → mở Dynamic Access Control.
+- Chọn Claim Types → tạo mới một Claim, ví dụ:
++ Name: Department
++ Attribute source: chọn thuộc tính AD của user (ví dụ Department).
+- Lưu claim type.
+
+* Áp dụng Claim cho User
+- Tại Server Manger > Dashboard, chọn Tools rồi chọn Active Directory Users and Computers
+- Vào Properties của 1 user trong AD.
+- Tab Organization hoặc Attribute Editor → nhập giá trị cho thuộc tính vừa chọn (ví dụ: Department = IT).
+
+* Bên máy client cần thực hiện: thực hiện Refresh Ticket Kerberos, sau khi chỉnh user thì cần cấp lại ticket Kerberos:
+- Xóa hết ticket hiện tại: klist purge
+- logoff rồi login lại hoặc chạy: klist get <domain>
+
+
+
+* Mặc định các giá trị trong KDC và Kerberos sẽ là Disabled nên khi ta không cấu hình (Not configured) thì nó sẽ là Disabled. Khi ta đã enabled nó lên rồi, muốn disabled nó thì chọn giá trị disabled luôn, nếu chọn Not Configure thì nó cũng sẽ lấy giá trị cũ ở đây là Enabled nên không phải là Disabled 

@@ -1,0 +1,57 @@
+* Kiểm tra cấu hình xác thực trong LDAP:
+- Thực hiện connect đến ldap server như bình thường nhưng không tick SSL (anonymous bind thường không được phép qua LDAPS)
+- Tiếp theo trong phần bind, phần bind type chọn Simple bind và để trống tất cả thông tin, bỏ chọn "Encrypt Traffic after bind"
+- Nếu thành công sẽ hiện script như thế này:
+-----------
+res = ldap_simple_bind_s(ld, '', <unavailable>); // v.3
+Authenticated as: 'NT AUTHORITY\ANONYMOUS LOGON'.
+-----------
+- Chứng tỏ server cấu hình còn lỏng lẻo vì cho phép anonymous kết nối tới
+
+
+* Chặn anonymous bind:
+- Trong cấu hình mặc định thì server chỉ cho tài khoản này kết nối tới LDAP thôi còn muốn truy vấn thông tin thì phải có credential
+- Cấu hình server không cho nó bind simple luôn.
+- Cấu hình trong: GPO → Computer Configuration → Windows Settings → Security Settings → Local Policies → Security Options
++ Network access: Let Everyone permissions apply to anonymous users → Disabled
++ Network access: Shares that can be accessed anonymously → <empty>
++ Network access: Named Pipes that can be accessed anonymously → <empty>
++ Network access: Restrict anonymous access to Named Pipes and Shares → Enabled
++ Network access: Do not allow anonymous enumeration of SAM accounts → Enabled
++ Network access: Do not allow anonymous enumeration of SAM accounts and shares → Enabled
+→ Giúp chặn hoàn toàn khả năng “ANONYMOUS LOGON” thấy thông tin hệ thống.
+
+thông tin ban đầu của name pipe: netlogon, samr, lsarpc
+
+
+* Tại sao simple bind với user chính xác credential thì nó báo cần secure vì tôi cấu hình chặn bind simple rồi, nhưng simple với anonymous thì ok
+- Đơn giản vì đăng nhập với anonymous thì các trường user và password bị bỏ trống, nó không thực hiện gửi thông tin nhạy cảm đi nên không bị báo. AD không xem đây là “simple bind với credential”, mà chỉ là “anonymous connect”.
+
+
+* Cấu hình triệt để tắt không cho bind với anonymous:
+- Mở ADSI Edit
+- Chuột phải vào “ADSI Edit” → “Connect to…”
+- Trong ô Select a well known Naming Context, chọn: Configuration
+- Điều hướng:
+CN=Configuration,DC=labrecon,DC=com
+└── CN=Services
+     └── CN=Windows NT
+          └── CN=Directory Service
+- Chuột phải vào CN=Directory Service → chọn Properties.
+- Tìm thuộc tính dSHeuristics: Nếu chưa tồn tại, nhấn Add. Nếu đã có, nhấn Edit. Nhập 0000002.
+- net stop ntds
+- net start ntds
+
+
+
+- Kết quả:
+-----------
+res = ldap_simple_bind_s(ld, '', <unavailable>); // v.3
+Error <52>: ldap_simple_bind_s() failed: Unavailable
+Server error: <empty>
+-----------
+
+* Giải thích:
+- Khi đặt dSHeuristics = 0000002. Nó báo cho Active Directory Domain Services (NTDS) rằng: “Không cho phép bất kỳ LDAP operation nào được thực hiện bởi anonymous connection.”
+- dSHeuristics = "0000002". Mỗi ký tự là một cờ điều khiển. Ký tự thứ 7 (tức là vị trí thứ 7, tính từ trái sang) điều khiển Anonymous LDAP operations.
+- việc đặt số 2 thường là deny/disable, 1 là enable, 0 là mặc định
